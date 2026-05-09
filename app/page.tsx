@@ -354,12 +354,21 @@ export default function Home() {
             label="Score Total"
             value={currencyFormatter.format(totals.totalValue)}
           />
-          <Link
-            className="flex items-center justify-center rounded-[1.4rem] bg-[#f6b23f] p-5 text-center font-black text-[#211406] transition hover:-translate-y-0.5 hover:brightness-110"
-            href="/saved-raids"
-          >
-            View Saved Grid
-          </Link>
+          {savedRaids.length > 0 ? (
+            <Link
+              className="flex items-center justify-center rounded-[1.4rem] bg-[#f6b23f] p-5 text-center font-black text-[#211406] transition hover:-translate-y-0.5 hover:brightness-110"
+              href="/saved-raids"
+            >
+              View Saved Raids
+            </Link>
+          ) : (
+            <span
+              aria-disabled="true"
+              className="flex cursor-not-allowed items-center justify-center rounded-[1.4rem] bg-white/20 p-5 text-center font-black text-white/55"
+            >
+              View Saved Raids
+            </span>
+          )}
         </div>
       </section>
 

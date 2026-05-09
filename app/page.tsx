@@ -316,9 +316,21 @@ export default function Home() {
 
       <section className="mb-6 grid gap-6">
         <div className="rounded-4xl border border-white/10 bg-[#101b2d]/85 p-11 shadow-[0_24px_80px_rgba(0,0,0,0.34)] backdrop-blur-2xl max-lg:p-8">
-          <h1 className="mb-5 max-w-[760px] text-[clamp(2.6rem,7vw,5.6rem)] font-black leading-[0.9] tracking-[-0.07em]">
-            Score Sheets
-          </h1>
+          {hostLogos.length > 0 ? (
+            <div className="mb-7 flex min-h-12 flex-wrap items-center justify-center gap-8">
+              {hostLogos.map((logo, index) => (
+                <Image
+                  alt={`Host logo ${index + 1}`}
+                  className="max-h-56 w-auto max-w-full rounded-3xl object-contain"
+                  height={224}
+                  key={logo}
+                  unoptimized
+                  src={logo}
+                  width={420}
+                />
+              ))}
+            </div>
+          ) : null}
           <p className="mb-0 max-w-[620px] text-lg leading-8 text-[#95a3b8]">
             Set up your teams once, then create a separate score sheet for each
             raid with kills, reds, and extracted loot tracked per team.

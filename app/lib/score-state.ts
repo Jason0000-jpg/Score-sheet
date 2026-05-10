@@ -30,6 +30,7 @@ export type SavedRaidScore = {
 
 export type SavedRaid = {
   id: string;
+  sourceRaidId?: string;
   raidName: string;
   savedAt: string;
   scoringValues: ScoringValues;
@@ -108,6 +109,44 @@ export const parseAmountInput = (value: string) => {
   return digitsOnly ? Number(digitsOnly) : 0;
 };
 
+const getSavedRaidTime = (savedRaid: SavedRaid) => {
+  const savedTime = new Date(savedRaid.savedAt).getTime();
+
+  return Number.isNaN(savedTime) ? 0 : savedTime;
+};
+
+export const normalizeRaidName = (raidName: string) =>
+  raidName
+    .normalize("NFKC")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+
+export const getSavedRaidKey = (savedRaid: SavedRaid) =>
+  normalizeRaidName(savedRaid.raidName) || savedRaid.sourceRaidId || savedRaid.id;
+
+export const normalizeSavedRaids = (savedRaids: SavedRaid[]) => {
+  const savedRaidsByName = new Map<string, SavedRaid>();
+
+  savedRaids.forEach((savedRaid) => {
+    const savedRaidKey = getSavedRaidKey(savedRaid);
+    const existingSavedRaid = savedRaidsByName.get(savedRaidKey);
+
+    if (
+      !existingSavedRaid ||
+      getSavedRaidTime(savedRaid) >= getSavedRaidTime(existingSavedRaid)
+    ) {
+      savedRaidsByName.set(savedRaidKey, savedRaid);
+    }
+  });
+
+  return Array.from(savedRaidsByName.values()).sort(
+    (firstSavedRaid, secondSavedRaid) =>
+      getSavedRaidTime(secondSavedRaid) - getSavedRaidTime(firstSavedRaid),
+  );
+};
+
 export const parseState = (snapshot: string): AppState => {
   try {
     const parsedState = JSON.parse(snapshot) as Partial<AppState>;
@@ -121,7 +160,7 @@ export const parseState = (snapshot: string): AppState => {
         dogTagValue: parsedState.scoringValues?.dogTagValue ?? 0,
       },
       savedRaids: Array.isArray(parsedState.savedRaids)
-        ? parsedState.savedRaids
+        ? normalizeSavedRaids(parsedState.savedRaids)
         : [],
       hostLogos: Array.isArray(parsedState.hostLogos) ? parsedState.hostLogos : [],
     };

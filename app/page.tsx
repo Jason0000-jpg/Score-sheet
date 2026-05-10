@@ -22,6 +22,7 @@ import {
   getRaidScore,
   getScoreTotal,
   getStateSnapshot,
+  normalizeRaidName,
   parseState,
   saveState,
   subscribeToState,
@@ -43,6 +44,9 @@ const readImageAsDataUrl = (file: File) =>
 export default function Home() {
   const [teamName, setTeamName] = useState("");
   const [savedRaidIds, setSavedRaidIds] = useState<Record<string, boolean>>({});
+  const [collapsedRaidIds, setCollapsedRaidIds] = useState<
+    Record<string, boolean>
+  >({});
   const stateSnapshot = useSyncExternalStore(
     subscribeToState,
     getStateSnapshot,
@@ -75,7 +79,7 @@ export default function Home() {
   );
 
   const saveNextState = (updater: (state: AppState) => AppState) => {
-    saveState(updater({ teams, raids, scoringValues, savedRaids, hostLogos }));
+    saveState(updater(parseState(getStateSnapshot())));
   };
 
   const markRaidUnsaved = (raidId: string) => {
@@ -84,6 +88,13 @@ export default function Home() {
         ? { ...currentSavedRaidIds, [raidId]: false }
         : currentSavedRaidIds,
     );
+  };
+
+  const toggleRaidScores = (raidId: string) => {
+    setCollapsedRaidIds((currentCollapsedRaidIds) => ({
+      ...currentCollapsedRaidIds,
+      [raidId]: !currentCollapsedRaidIds[raidId],
+    }));
   };
 
   const handleAddTeam = (event: FormEvent<HTMLFormElement>) => {
@@ -197,6 +208,12 @@ export default function Home() {
 
       return nextSavedRaidIds;
     });
+    setCollapsedRaidIds((currentCollapsedRaidIds) => {
+      const nextCollapsedRaidIds = { ...currentCollapsedRaidIds };
+      delete nextCollapsedRaidIds[raidId];
+
+      return nextCollapsedRaidIds;
+    });
     saveNextState((currentState) => ({
       ...currentState,
       raids: currentState.raids.filter((raid) => raid.id !== raidId),
@@ -232,22 +249,55 @@ export default function Home() {
       [raidId]: true,
     }));
 
-    const savedRaid: SavedRaid = {
-      id: crypto.randomUUID(),
-      raidName: raid.name,
-      savedAt: new Date().toISOString(),
-      scoringValues,
-      teamScores: teams.map((team) => ({
-        teamId: team.id,
-        teamName: team.name,
-        score: getRaidScore(raid, team.id),
-      })),
-    };
+    saveNextState((currentState) => {
+      const raidNameKey = normalizeRaidName(raid.name);
+      const sourceSavedRaid = currentState.savedRaids.find(
+        (currentSavedRaid) => currentSavedRaid.sourceRaidId === raidId,
+      );
+      const namedSavedRaid = currentState.savedRaids.find(
+        (currentSavedRaid) =>
+          normalizeRaidName(currentSavedRaid.raidName) === raidNameKey,
+      );
+      const existingSavedRaid = sourceSavedRaid ?? namedSavedRaid;
+      const savedRaid: SavedRaid = {
+        id: existingSavedRaid?.id ?? raidId,
+        sourceRaidId: raidId,
+        raidName: raid.name,
+        savedAt: new Date().toISOString(),
+        scoringValues,
+        teamScores: teams.map((team) => ({
+          teamId: team.id,
+          teamName: team.name,
+          score: getRaidScore(raid, team.id),
+        })),
+      };
 
-    saveNextState((currentState) => ({
-      ...currentState,
-      savedRaids: [savedRaid, ...currentState.savedRaids],
-    }));
+      return {
+        ...currentState,
+        savedRaids: existingSavedRaid
+          ? currentState.savedRaids.flatMap((currentSavedRaid) => {
+              const isCurrentSavedRaid =
+                currentSavedRaid.id === existingSavedRaid?.id;
+              const isSameSourceRaid = currentSavedRaid.sourceRaidId === raidId;
+              const isSameNamedRaid =
+                normalizeRaidName(currentSavedRaid.raidName) === raidNameKey;
+
+              if (isCurrentSavedRaid) {
+                return [savedRaid];
+              }
+
+              return isSameSourceRaid || isSameNamedRaid ? [] : [currentSavedRaid];
+            })
+          : [
+              savedRaid,
+              ...currentState.savedRaids.filter(
+                (currentSavedRaid) =>
+                  currentSavedRaid.sourceRaidId !== raidId &&
+                  normalizeRaidName(currentSavedRaid.raidName) !== raidNameKey,
+              ),
+            ],
+      };
+    });
   };
 
   const updateRaidScore = (
@@ -508,7 +558,7 @@ export default function Home() {
           </form>
 
           <button
-            className="min-h-12 rounded-2xl bg-[#f6b23f] px-5 font-black text-[#211406] transition hover:-translate-y-0.5 hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:translate-y-0"
+            className="min-h-12 rounded-2xl bg-green-400 px-5 font-black text-[#211406] transition hover:-translate-y-0.5 hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:translate-y-0"
             disabled={teams.length === 0}
             onClick={addRaid}
             type="button"
@@ -613,6 +663,19 @@ export default function Home() {
                 { kills: 0, reds: 0, dogTags: 0, extractedLoot: 0, totalValue: 0 },
               );
               const isRaidSaved = savedRaidIds[raid.id];
+              const raidNameKey = normalizeRaidName(raid.name);
+              const existingSavedRaid = savedRaids.find(
+                (savedRaid) =>
+                  savedRaid.sourceRaidId === raid.id ||
+                  normalizeRaidName(savedRaid.raidName) === raidNameKey,
+              );
+              const saveButtonLabel = existingSavedRaid
+                ? isRaidSaved
+                  ? "Raid Saved"
+                  : "Update Raid Scores"
+                : "Save Raid Scores";
+              const areRaidScoresCollapsed = collapsedRaidIds[raid.id];
+              const raidScoresId = `raid-scores-${raid.id}`;
 
               return (
                 <article
@@ -650,7 +713,7 @@ export default function Home() {
                         onClick={() => saveRaidScores(raid.id)}
                         type="button"
                       >
-                        {isRaidSaved ? "Saved" : "Save Raid Scores"}
+                        {saveButtonLabel}
                       </button>
                       <button
                         className="rounded-2xl bg-[#f6b23f] px-4 font-black text-[#211406] transition hover:-translate-y-0.5 hover:brightness-110 max-sm:min-h-12"
@@ -683,77 +746,120 @@ export default function Home() {
                     />
                   </div>
 
-                  <div className="grid grid-cols-2 gap-5 max-lg:grid-cols-1">
-                    {teams.map((team) => {
-                      const score = getRaidScore(raid, team.id);
-                      const scoreTotal = getScoreTotal(score, scoringValues);
+                  <button
+                    aria-controls={raidScoresId}
+                    aria-expanded={!areRaidScoresCollapsed}
+                    aria-label={
+                      areRaidScoresCollapsed
+                        ? "Show team scores"
+                        : "Hide team scores"
+                    }
+                    className="mx-auto mb-5 flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-white/5 text-white/65 transition hover:-translate-y-0.5 hover:bg-white/10 hover:text-white"
+                    onClick={() => toggleRaidScores(raid.id)}
+                    type="button"
+                  >
+                    <svg
+                      aria-hidden="true"
+                      className={
+                        areRaidScoresCollapsed
+                          ? "h-4 w-4 rotate-180 transition-transform"
+                          : "h-4 w-4 transition-transform"
+                      }
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        d="M6 15l6-6 6 6"
+                        stroke="currentColor"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="3"
+                      />
+                    </svg>
+                  </button>
 
-                      return (
-                        <div
-                          className="rounded-[1.25rem] bg-white/5.5 p-4"
-                          key={`${raid.id}-${team.id}`}
-                        >
-                          <h3 className="mb-4 text-xl font-black">{team.name}</h3>
-                          <div className="grid gap-4">
-                            <ScoreInput
-                              label="Kills"
-                              onAdjust={(amount) =>
-                                adjustRaidScore(raid.id, team.id, "kills", amount)
-                              }
-                              onChange={(value) =>
-                                updateRaidScore(raid.id, team.id, "kills", value)
-                              }
-                              value={score.kills}
-                            />
-                            <ScoreInput
-                              label="Reds"
-                              onAdjust={(amount) =>
-                                adjustRaidScore(raid.id, team.id, "reds", amount)
-                              }
-                              onChange={(value) =>
-                                updateRaidScore(raid.id, team.id, "reds", value)
-                              }
-                              value={score.reds}
-                            />
-                            <ScoreInput
-                              label="Dog Tags"
-                              onAdjust={(amount) =>
-                                adjustRaidScore(
-                                  raid.id,
-                                  team.id,
-                                  "dogTags",
-                                  amount,
-                                )
-                              }
-                              onChange={(value) =>
-                                updateRaidScore(
-                                  raid.id,
-                                  team.id,
-                                  "dogTags",
-                                  value,
-                                )
-                              }
-                              value={score.dogTags}
-                            />
-                            <LootInput
-                              onChange={(value) =>
-                                updateRaidScore(
-                                  raid.id,
-                                  team.id,
-                                  "extractedLoot",
-                                  value,
-                                )
-                              }
-                              value={score.extractedLoot}
-                            />
-                            <SummaryStat
-                              label="Team Total"
-                              value={currencyFormatter.format(scoreTotal)}
-                            />
+                  <div
+                    className={
+                      areRaidScoresCollapsed
+                        ? "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-300 ease-in-out"
+                        : "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-300 ease-in-out"
+                    }
+                    id={raidScoresId}
+                  >
+                    <div className="overflow-hidden">
+                      <div className="grid grid-cols-2 gap-5 max-lg:grid-cols-1">
+                      {teams.map((team) => {
+                        const score = getRaidScore(raid, team.id);
+                        const scoreTotal = getScoreTotal(score, scoringValues);
+
+                        return (
+                          <div
+                            className="rounded-[1.25rem] bg-white/5.5 p-4"
+                            key={`${raid.id}-${team.id}`}
+                          >
+                            <h3 className="mb-4 text-xl font-black">{team.name}</h3>
+                            <div className="grid gap-4">
+                              <ScoreInput
+                                label="Kills"
+                                onAdjust={(amount) =>
+                                  adjustRaidScore(raid.id, team.id, "kills", amount)
+                                }
+                                onChange={(value) =>
+                                  updateRaidScore(raid.id, team.id, "kills", value)
+                                }
+                                value={score.kills}
+                              />
+                              <ScoreInput
+                                label="Reds"
+                                onAdjust={(amount) =>
+                                  adjustRaidScore(raid.id, team.id, "reds", amount)
+                                }
+                                onChange={(value) =>
+                                  updateRaidScore(raid.id, team.id, "reds", value)
+                                }
+                                value={score.reds}
+                              />
+                              <ScoreInput
+                                label="Dog Tags"
+                                onAdjust={(amount) =>
+                                  adjustRaidScore(
+                                    raid.id,
+                                    team.id,
+                                    "dogTags",
+                                    amount,
+                                  )
+                                }
+                                onChange={(value) =>
+                                  updateRaidScore(
+                                    raid.id,
+                                    team.id,
+                                    "dogTags",
+                                    value,
+                                  )
+                                }
+                                value={score.dogTags}
+                              />
+                              <LootInput
+                                onChange={(value) =>
+                                  updateRaidScore(
+                                    raid.id,
+                                    team.id,
+                                    "extractedLoot",
+                                    value,
+                                  )
+                                }
+                                value={score.extractedLoot}
+                              />
+                              <SummaryStat
+                                label="Team Total"
+                                value={currencyFormatter.format(scoreTotal)}
+                              />
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      })}
+                      </div>
+                    </div>
                   </div>
                 </article>
               );

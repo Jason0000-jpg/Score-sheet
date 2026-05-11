@@ -36,11 +36,11 @@ export function ScoreInput({
   value,
 }: ScoreInputProps) {
   return (
-    <div className="rounded-[1.25rem] bg-white/5.5 p-4">
+    <div className="min-w-0 rounded-[1.25rem] bg-white/5.5 p-4">
       <label className="mb-2 block text-sm font-extrabold uppercase tracking-[0.08em] text-[#95a3b8]">
         {label}
       </label>
-      <div className="grid grid-cols-[48px_minmax(0,1fr)_48px] gap-2.5">
+      <div className="grid grid-cols-[44px_minmax(64px,1fr)_44px] gap-2.5">
         <button
           className="min-h-12 rounded-2xl bg-[#f6b23f] text-2xl font-black text-[#211406] transition hover:-translate-y-0.5 hover:brightness-110"
           onClick={() => onAdjust(-1)}
@@ -70,12 +70,12 @@ export function ScoreInput({
 
 export function LootInput({ onChange, value }: Omit<ValueInputProps, "label">) {
   return (
-    <div className="rounded-[1.25rem] bg-white/5.5 p-4">
+    <div className="min-w-0 rounded-[1.25rem] bg-white/5.5 p-4">
       <label className="mb-2 block text-sm font-extrabold uppercase tracking-[0.08em] text-[#95a3b8]">
         Extracted Loot
       </label>
       <input
-        className="min-w-0 rounded-2xl border border-white/10 bg-white/10 px-4 py-3.5 text-white placeholder:text-white/45"
+        className="w-full min-w-0 rounded-2xl border border-white/10 bg-white/10 px-4 py-3.5 text-white placeholder:text-white/45"
         inputMode="numeric"
         onChange={(event) => onChange(parseAmountInput(event.target.value))}
         pattern="[0-9]*"

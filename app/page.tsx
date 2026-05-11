@@ -22,6 +22,7 @@ import {
   getRaidScore,
   getScoreTotal,
   getStateSnapshot,
+  getTeamKills,
   normalizeRaidName,
   parseState,
   saveState,
@@ -43,6 +44,9 @@ const readImageAsDataUrl = (file: File) =>
 
 export default function Home() {
   const [teamName, setTeamName] = useState("");
+  const [playerNameInputs, setPlayerNameInputs] = useState<Record<string, string>>(
+    {},
+  );
   const [savedRaidIds, setSavedRaidIds] = useState<Record<string, boolean>>({});
   const [collapsedRaidIds, setCollapsedRaidIds] = useState<
     Record<string, boolean>
@@ -65,7 +69,7 @@ export default function Home() {
             const score = getRaidScore(raid, team.id);
 
             return {
-              kills: raidTotals.kills + score.kills,
+              kills: raidTotals.kills + getTeamKills(score),
               reds: raidTotals.reds + score.reds,
               dogTags: raidTotals.dogTags + score.dogTags,
               extractedLoot: raidTotals.extractedLoot + score.extractedLoot,
@@ -115,7 +119,7 @@ export default function Home() {
         ...raid,
         scores: {
           ...raid.scores,
-          [team.id]: { ...EMPTY_SCORE },
+          [team.id]: { ...EMPTY_SCORE, playerKills: {} },
         },
       })),
     }));
@@ -135,6 +139,12 @@ export default function Home() {
 
   const removeTeam = (teamId: string) => {
     setSavedRaidIds({});
+    setPlayerNameInputs((currentPlayerNameInputs) => {
+      const nextPlayerNameInputs = { ...currentPlayerNameInputs };
+      delete nextPlayerNameInputs[teamId];
+
+      return nextPlayerNameInputs;
+    });
     saveNextState((currentState) => ({
       ...currentState,
       teams: currentState.teams.filter((team) => team.id !== teamId),
@@ -145,6 +155,98 @@ export default function Home() {
         return { ...raid, scores };
       }),
     }));
+  };
+
+  const addPlayerToTeam = (teamId: string) => {
+    const trimmedPlayerName = playerNameInputs[teamId]?.trim();
+
+    if (!trimmedPlayerName) {
+      return;
+    }
+
+    const player = {
+      id: crypto.randomUUID(),
+      name: trimmedPlayerName,
+    };
+
+    saveNextState((currentState) => ({
+      ...currentState,
+      teams: currentState.teams.map((team) =>
+        team.id === teamId
+          ? { ...team, players: [...team.players, player] }
+          : team,
+      ),
+      raids: currentState.raids.map((raid) => {
+        const score = getRaidScore(raid, teamId);
+
+        return {
+          ...raid,
+          scores: {
+            ...raid.scores,
+            [teamId]: {
+              ...score,
+              playerKills: {
+                ...score.playerKills,
+                [player.id]: 0,
+              },
+            },
+          },
+        };
+      }),
+    }));
+    setPlayerNameInputs((currentPlayerNameInputs) => ({
+      ...currentPlayerNameInputs,
+      [teamId]: "",
+    }));
+    setSavedRaidIds({});
+  };
+
+  const updatePlayerName = (teamId: string, playerId: string, name: string) => {
+    saveNextState((currentState) => ({
+      ...currentState,
+      teams: currentState.teams.map((team) =>
+        team.id === teamId
+          ? {
+              ...team,
+              players: team.players.map((player) =>
+                player.id === playerId ? { ...player, name } : player,
+              ),
+            }
+          : team,
+      ),
+    }));
+    setSavedRaidIds({});
+  };
+
+  const removePlayerFromTeam = (teamId: string, playerId: string) => {
+    saveNextState((currentState) => ({
+      ...currentState,
+      teams: currentState.teams.map((team) =>
+        team.id === teamId
+          ? {
+              ...team,
+              players: team.players.filter((player) => player.id !== playerId),
+            }
+          : team,
+      ),
+      raids: currentState.raids.map((raid) => {
+        const score = getRaidScore(raid, teamId);
+        const playerKills = { ...score.playerKills };
+        delete playerKills[playerId];
+
+        return {
+          ...raid,
+          scores: {
+            ...raid.scores,
+            [teamId]: {
+              ...score,
+              playerKills,
+            },
+          },
+        };
+      }),
+    }));
+    setSavedRaidIds({});
   };
 
   const updateScoringValue = (field: ScoringValueField, value: number) => {
@@ -229,7 +331,15 @@ export default function Home() {
           ? {
               ...raid,
               scores: Object.fromEntries(
-                currentState.teams.map((team) => [team.id, { ...EMPTY_SCORE }]),
+                currentState.teams.map((team) => [
+                  team.id,
+                  {
+                    ...EMPTY_SCORE,
+                    playerKills: Object.fromEntries(
+                      team.players.map((player) => [player.id, 0]),
+                    ),
+                  },
+                ]),
               ),
             }
           : raid,
@@ -328,6 +438,61 @@ export default function Home() {
         };
       }),
     }));
+  };
+
+  const updatePlayerKills = (
+    raidId: string,
+    teamId: string,
+    playerId: string,
+    value: number,
+  ) => {
+    markRaidUnsaved(raidId);
+    saveNextState((currentState) => ({
+      ...currentState,
+      raids: currentState.raids.map((raid) => {
+        if (raid.id !== raidId) {
+          return raid;
+        }
+
+        const score = getRaidScore(raid, teamId);
+        const playerKills = {
+          ...score.playerKills,
+          [playerId]: Math.max(0, value),
+        };
+
+        return {
+          ...raid,
+          scores: {
+            ...raid.scores,
+            [teamId]: {
+              ...score,
+              kills: Object.values(playerKills).reduce(
+                (totalKills, kills) => totalKills + kills,
+                0,
+              ),
+              playerKills,
+            },
+          },
+        };
+      }),
+    }));
+  };
+
+  const adjustPlayerKills = (
+    raidId: string,
+    teamId: string,
+    playerId: string,
+    amount: number,
+  ) => {
+    const raid = raids.find((currentRaid) => currentRaid.id === raidId);
+    const score = raid ? getRaidScore(raid, teamId) : EMPTY_SCORE;
+
+    updatePlayerKills(
+      raidId,
+      teamId,
+      playerId,
+      (score.playerKills[playerId] ?? 0) + amount,
+    );
   };
 
   const adjustRaidScore = (
@@ -585,22 +750,94 @@ export default function Home() {
           <div className="grid grid-cols-2 gap-4 max-lg:grid-cols-1">
             {teams.map((team) => (
               <div
-                className="flex gap-2.5 rounded-[1.25rem] border border-white/10 bg-[#101b2d]/85 p-4 shadow-[0_24px_80px_rgba(0,0,0,0.22)] backdrop-blur-2xl max-sm:flex-col"
+                className="grid gap-4 rounded-[1.25rem] border border-white/10 bg-[#101b2d]/85 p-4 shadow-[0_24px_80px_rgba(0,0,0,0.22)] backdrop-blur-2xl"
                 key={team.id}
               >
-                <input
-                  aria-label={`${team.name} name`}
-                  className="min-w-0 flex-1 rounded-2xl border border-white/10 bg-white/10 px-4 py-3.5 text-lg font-black text-white"
-                  onChange={(event) => updateTeamName(team.id, event.target.value)}
-                  value={team.name}
-                />
-                <button
-                  className="rounded-2xl border border-red-400/40 bg-red-400/10 px-4 font-extrabold text-red-100 transition hover:-translate-y-0.5 hover:brightness-110 max-sm:min-h-12"
-                  onClick={() => removeTeam(team.id)}
-                  type="button"
-                >
-                  Remove
-                </button>
+                <div className="flex gap-2.5 max-sm:flex-col">
+                  <input
+                    aria-label={`${team.name} name`}
+                    className="min-w-0 flex-1 rounded-2xl border border-white/10 bg-white/10 px-4 py-3.5 text-lg font-black text-white"
+                    onChange={(event) =>
+                      updateTeamName(team.id, event.target.value)
+                    }
+                    value={team.name}
+                  />
+                  <button
+                    className="rounded-2xl border border-red-400/40 bg-red-400/10 px-4 font-extrabold text-red-100 transition hover:-translate-y-0.5 hover:brightness-110 max-sm:min-h-12"
+                    onClick={() => removeTeam(team.id)}
+                    type="button"
+                  >
+                    Remove
+                  </button>
+                </div>
+
+                <div className="grid gap-2">
+                  <p className="mb-0 text-sm font-extrabold uppercase tracking-[0.08em] text-[#95a3b8]">
+                    Players
+                  </p>
+                  {team.players.length === 0 ? (
+                    <p className="mb-0 rounded-2xl bg-white/5 p-3 text-sm text-[#95a3b8]">
+                      Add players to capture kills per player for this team.
+                    </p>
+                  ) : (
+                    <div className="grid gap-2">
+                      {team.players.map((player) => (
+                        <div
+                          className="flex gap-2 max-sm:flex-col"
+                          key={player.id}
+                        >
+                          <input
+                            aria-label={`${team.name} player name`}
+                            className="min-w-0 flex-1 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-white"
+                            onChange={(event) =>
+                              updatePlayerName(
+                                team.id,
+                                player.id,
+                                event.target.value,
+                              )
+                            }
+                            value={player.name}
+                          />
+                          <button
+                            className="rounded-2xl border border-red-400/40 bg-red-400/10 px-4 font-extrabold text-red-100 transition hover:-translate-y-0.5 hover:brightness-110 max-sm:min-h-12"
+                            onClick={() => removePlayerFromTeam(team.id, player.id)}
+                            type="button"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="flex gap-2 max-sm:flex-col">
+                    <input
+                      aria-label={`Add player to ${team.name}`}
+                      className="min-w-0 flex-1 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-white placeholder:text-white/45"
+                      onChange={(event) =>
+                        setPlayerNameInputs((currentPlayerNameInputs) => ({
+                          ...currentPlayerNameInputs,
+                          [team.id]: event.target.value,
+                        }))
+                      }
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          addPlayerToTeam(team.id);
+                        }
+                      }}
+                      placeholder="Player name"
+                      value={playerNameInputs[team.id] ?? ""}
+                    />
+                    <button
+                      className="rounded-2xl bg-[#f6b23f] px-4 font-black text-[#211406] transition hover:-translate-y-0.5 hover:brightness-110 max-sm:min-h-12"
+                      onClick={() => addPlayerToTeam(team.id)}
+                      type="button"
+                    >
+                      Add Player
+                    </button>
+                  </div>
+                </div>
               </div>
             ))}
           </div>
@@ -651,7 +888,7 @@ export default function Home() {
                   const score = getRaidScore(raid, team.id);
 
                   return {
-                    kills: currentTotals.kills + score.kills,
+                    kills: currentTotals.kills + getTeamKills(score),
                     reds: currentTotals.reds + score.reds,
                     dogTags: currentTotals.dogTags + score.dogTags,
                     extractedLoot:
@@ -787,77 +1024,153 @@ export default function Home() {
                     id={raidScoresId}
                   >
                     <div className="overflow-hidden">
-                      <div className="grid grid-cols-2 gap-5 max-lg:grid-cols-1">
-                      {teams.map((team) => {
-                        const score = getRaidScore(raid, team.id);
-                        const scoreTotal = getScoreTotal(score, scoringValues);
+                      <div className="grid gap-4">
+                        {teams.map((team) => {
+                          const score = getRaidScore(raid, team.id);
+                          const scoreTotal = getScoreTotal(score, scoringValues);
+                          const teamKills = getTeamKills(score);
 
-                        return (
-                          <div
-                            className="rounded-[1.25rem] bg-white/5.5 p-4"
-                            key={`${raid.id}-${team.id}`}
-                          >
-                            <h3 className="mb-4 text-xl font-black">{team.name}</h3>
-                            <div className="grid gap-4">
-                              <ScoreInput
-                                label="Kills"
-                                onAdjust={(amount) =>
-                                  adjustRaidScore(raid.id, team.id, "kills", amount)
-                                }
-                                onChange={(value) =>
-                                  updateRaidScore(raid.id, team.id, "kills", value)
-                                }
-                                value={score.kills}
-                              />
-                              <ScoreInput
-                                label="Reds"
-                                onAdjust={(amount) =>
-                                  adjustRaidScore(raid.id, team.id, "reds", amount)
-                                }
-                                onChange={(value) =>
-                                  updateRaidScore(raid.id, team.id, "reds", value)
-                                }
-                                value={score.reds}
-                              />
-                              <ScoreInput
-                                label="Dog Tags"
-                                onAdjust={(amount) =>
-                                  adjustRaidScore(
-                                    raid.id,
-                                    team.id,
-                                    "dogTags",
-                                    amount,
-                                  )
-                                }
-                                onChange={(value) =>
-                                  updateRaidScore(
-                                    raid.id,
-                                    team.id,
-                                    "dogTags",
-                                    value,
-                                  )
-                                }
-                                value={score.dogTags}
-                              />
-                              <LootInput
-                                onChange={(value) =>
-                                  updateRaidScore(
-                                    raid.id,
-                                    team.id,
-                                    "extractedLoot",
-                                    value,
-                                  )
-                                }
-                                value={score.extractedLoot}
-                              />
-                              <SummaryStat
-                                label="Team Total"
-                                value={currencyFormatter.format(scoreTotal)}
-                              />
+                          return (
+                            <div
+                              className="grid gap-5 rounded-3xl border border-white/10 bg-white/5.5 p-5"
+                              key={`${raid.id}-${team.id}`}
+                            >
+                              <div className="flex items-center justify-between gap-4 max-md:flex-col max-md:items-stretch">
+                                <h3 className="mb-0 text-3xl font-black">
+                                  {team.name}
+                                </h3>
+                                <div className="grid gap-2 sm:grid-cols-2">
+                                  <div className="rounded-2xl bg-white/5 px-5 py-3 text-right max-md:text-left">
+                                    <span className="block text-sm font-extrabold uppercase tracking-[0.08em] text-[#95a3b8]">
+                                      Team Kills
+                                    </span>
+                                    <strong className="block text-3xl leading-tight text-white">
+                                      {teamKills}
+                                    </strong>
+                                  </div>
+                                  <div className="rounded-2xl bg-green-400/10 px-5 py-3 text-right max-md:text-left">
+                                    <span className="block text-sm font-extrabold uppercase tracking-[0.08em] text-green-200">
+                                      Team Total
+                                    </span>
+                                    <strong className="block whitespace-nowrap text-3xl leading-tight text-green-400">
+                                      {currencyFormatter.format(scoreTotal)}
+                                    </strong>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="grid gap-5 rounded-[1.25rem] bg-[#151515] p-4">
+                                <div className="flex items-center justify-between gap-3">
+                                  <p className="mb-0 text-sm font-extrabold uppercase tracking-[0.08em] text-[#95a3b8]">
+                                    Player Kills
+                                  </p>
+                                  <span className="text-sm font-bold text-[#95a3b8]">
+                                    Total: {teamKills}
+                                  </span>
+                                </div>
+                                  {team.players.length === 0 ? (
+                                    <div className="max-w-sm">
+                                      <ScoreInput
+                                        label="Team Kills"
+                                        onAdjust={(amount) =>
+                                          adjustRaidScore(
+                                            raid.id,
+                                            team.id,
+                                            "kills",
+                                            amount,
+                                          )
+                                        }
+                                        onChange={(value) =>
+                                          updateRaidScore(
+                                            raid.id,
+                                            team.id,
+                                            "kills",
+                                            value,
+                                          )
+                                        }
+                                        value={score.kills}
+                                      />
+                                    </div>
+                                  ) : (
+                                    <div className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+                                      {team.players.map((player) => (
+                                        <ScoreInput
+                                          key={player.id}
+                                          label={player.name || "Unnamed Player"}
+                                          onAdjust={(amount) =>
+                                            adjustPlayerKills(
+                                              raid.id,
+                                              team.id,
+                                              player.id,
+                                              amount,
+                                            )
+                                          }
+                                          onChange={(value) =>
+                                            updatePlayerKills(
+                                              raid.id,
+                                              team.id,
+                                              player.id,
+                                              value,
+                                            )
+                                          }
+                                          value={score.playerKills[player.id] ?? 0}
+                                        />
+                                      ))}
+                                    </div>
+                                  )}
+                              </div>
+
+                              <div className="grid gap-3 rounded-[1.25rem] bg-[#151515] p-4">
+                                <p className="mb-0 text-sm font-extrabold uppercase tracking-[0.08em] text-[#95a3b8]">
+                                  Raid Results
+                                </p>
+                                <div className="grid min-w-0 gap-4 md:grid-cols-3">
+                                  <ScoreInput
+                                    label="Reds"
+                                    onAdjust={(amount) =>
+                                      adjustRaidScore(raid.id, team.id, "reds", amount)
+                                    }
+                                    onChange={(value) =>
+                                      updateRaidScore(raid.id, team.id, "reds", value)
+                                    }
+                                    value={score.reds}
+                                  />
+                                  <ScoreInput
+                                    label="Dog Tags"
+                                    onAdjust={(amount) =>
+                                      adjustRaidScore(
+                                        raid.id,
+                                        team.id,
+                                        "dogTags",
+                                        amount,
+                                      )
+                                    }
+                                    onChange={(value) =>
+                                      updateRaidScore(
+                                        raid.id,
+                                        team.id,
+                                        "dogTags",
+                                        value,
+                                      )
+                                    }
+                                    value={score.dogTags}
+                                  />
+                                  <LootInput
+                                    onChange={(value) =>
+                                      updateRaidScore(
+                                        raid.id,
+                                        team.id,
+                                        "extractedLoot",
+                                        value,
+                                      )
+                                    }
+                                    value={score.extractedLoot}
+                                  />
+                                </div>
+                              </div>
                             </div>
-                          </div>
-                        );
-                      })}
+                          );
+                        })}
                       </div>
                     </div>
                   </div>

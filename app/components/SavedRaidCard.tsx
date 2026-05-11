@@ -6,6 +6,7 @@ import { toPng } from "html-to-image";
 import {
   currencyFormatter,
   getScoreTotal,
+  getTeamKills,
   type SavedRaid,
 } from "../lib/score-state";
 import { SummaryStat } from "./SummaryStat";
@@ -26,7 +27,7 @@ export function SavedRaidCard({ hostLogos, raid }: SavedRaidCardProps) {
   const [isExporting, setIsExporting] = useState(false);
   const raidTotals = raid.teamScores.reduce(
     (totals, teamScore) => ({
-      kills: totals.kills + teamScore.score.kills,
+      kills: totals.kills + getTeamKills(teamScore.score),
       reds: totals.reds + teamScore.score.reds,
       dogTags: totals.dogTags + (teamScore.score.dogTags ?? 0),
       extractedLoot: totals.extractedLoot + teamScore.score.extractedLoot,
@@ -173,7 +174,8 @@ export function SavedRaidCard({ hostLogos, raid }: SavedRaidCardProps) {
 
           <div className="grid gap-3">
             {raid.teamScores.map((teamScore) => {
-              const killValue = teamScore.score.kills * raid.scoringValues.killValue;
+              const killValue =
+                getTeamKills(teamScore.score) * raid.scoringValues.killValue;
               const redValue = teamScore.score.reds * raid.scoringValues.redValue;
               const dogTagValue =
                 (teamScore.score.dogTags ?? 0) * raid.scoringValues.dogTagValue;
@@ -194,7 +196,7 @@ export function SavedRaidCard({ hostLogos, raid }: SavedRaidCardProps) {
                   </div>
                   <div className="grid grid-cols-4 gap-3 text-base font-semibold text-[#95a3b8] max-sm:grid-cols-2">
                     <span>
-                      Kills: {teamScore.score.kills} (
+                      Kills: {getTeamKills(teamScore.score)} (
                       <span className="text-green-400">
                         {currencyFormatter.format(killValue)}
                       </span>

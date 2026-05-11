@@ -12,6 +12,7 @@ export function AppNav({ hostLogos }: AppNavProps) {
   const pathname = usePathname();
   const isSetupActive = pathname === "/";
   const isScoresActive = pathname === "/saved-raids";
+  const isFinalScoresActive = pathname === "/final-scores";
   const getLinkClassName = (isActive: boolean) =>
     isActive
       ? "rounded-2xl bg-white px-4 py-2 text-center font-black text-[#211406] transition hover:-translate-y-0.5 hover:brightness-110"
@@ -32,6 +33,12 @@ export function AppNav({ hostLogos }: AppNavProps) {
           href="/saved-raids"
         >
           Scores
+        </Link>
+        <Link
+          className={getLinkClassName(isFinalScoresActive)}
+          href="/final-scores"
+        >
+          Final Scores
         </Link>
       </div>
       <HostLogoNavSlot logo={hostLogos[1]} position="right" />
